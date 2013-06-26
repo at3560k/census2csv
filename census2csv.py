@@ -109,10 +109,6 @@ CENSUS_API_KEY = '6bc84b8daed00a678df401d13546c3696bdfdfbb'
 SF1_URL = 'http://api.census.gov/data/2010/sf1'
 VARS_PER_QUERY = 15  # Listed max is 50 at which they err
 
-OUTDIR = 'output'
-DATADIR = opj(OUTDIR, 'data')
-METADATA = opj(OUTDIR, 'metadata.csv')
-
 # To be respectful to the server, we do not hose them between requests
 POLITE_SLEEP = (1, 3)   # min, max seconds
 
@@ -268,7 +264,31 @@ def getConcepts(tree):
 
 
 #----------------------------------------------------------------------
-def buildBadMD(tree):
+def buildOutputDirs(args):
+    """
+    Test & Create
+    """
+
+    rootFolder = args.OUTDIR
+    dataDir = opj(rootFolder, 'data')
+
+    # Good
+    if os.path.isdir(rootFolder) and os.path.isdir(dataDir):
+        return
+
+    try:
+        os.makedirs(dataDir)
+    except OSError:
+        # Problem
+        raise IOError("%(F)s or %(F)s/data already exist" %
+            {'F': rootFolder})
+
+
+#----------------------------------------------------------------------
+
+
+#----------------------------------------------------------------------
+def buildBadMD(tree, writeTo):
     """
     Sorry to metadata a CSV, world
     """
@@ -284,7 +304,7 @@ def buildBadMD(tree):
     # This probably needs to be UTF8-ified too
 
     #conceptName, varName, varText
-    with open(METADATA, 'w') as md:
+    with open(opj(writeTo, 'metadata.csv'), 'w') as md:
         dw = csv.DictWriter(
             md,
             header
@@ -453,7 +473,7 @@ def buildCSVs(tree, args):
         )
         buildCSV(
             concept,
-            opj(DATADIR, shortName + '.csv'),
+            opj(args.OUTDIR, 'data', shortName + '.csv'),
             tree
         )
 #----------------------------------------------------------------------
@@ -533,8 +553,10 @@ def main(args):
     updateProgress(disable=args.progress)
     updateProgress(0, 0, 1, 0, 1)  # Initialize
 
+    buildOutputDirs(args)
+
     tree = getEtree(args.SF1)
-    buildBadMD(tree)  # Write csv (easy to inspect, not really MD though)
+    buildBadMD(tree, args.OUTDIR)  # Write csv (easy to inspect, not really MD though)
     INFO('Metadata CSV generated')
     buildCSVs(tree, args)  # write lots of CSV
     updateProgress(100)  # Initialize
@@ -573,6 +595,10 @@ if __name__ == '__main__':
         parser.add_argument('-x', '--xml', type=argparse.FileType('r'),
             nargs='?', default='sf1.xml', dest='SF1',
             help='US Census Summary File 1 (default: sf1.xml)')
+
+        parser.add_argument('-o', '--outdir', default='output',
+            nargs='?', dest='OUTDIR',
+            help='Output folder for files (default: outdir)')
 
         parsed = parser.parse_args()
 
