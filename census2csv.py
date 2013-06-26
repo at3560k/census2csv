@@ -2,14 +2,16 @@
 
 """
 DESCRIPTION:
-    Take census XML.  Use API to download & generate...
-    - 1 CSV per concept
-      - containing one column per concept variable
-        - named as "{CONCEPTID}.csv" (e.g. "P12.csv")
-    - 'metadata.csv'
-      - col1: concept name
-      - col2: variable name
-      - col3: variable text
+    Take census XML.  Use API to download & generate:
+    - In '{OUTDIR}/data/'
+      - 1 CSV per concept named as "{CONCEPTID}.csv" (e.g. "P12.csv")
+        - containing state, and county ID columns
+        - containing one column per concept variable
+          - column identified with short header
+    - In '{OUTDIR}/metadata.csv'
+      - col1: concept name  (group)
+      - col2: variable name (short header)
+      - col3: variable text (full header)
 """
 
 """
@@ -161,9 +163,10 @@ def updateProgress(percent=None,  # Static
     # Assign statics
     if disable is not None:
         up.disable = disable
+        return
 
-    # Shortcircuit.  It's set (not setting disable precludes assigning)
-    if disable or getattr(up, 'disable', disable) is False:
+    # Shortcircuit.  It's set (setting disable precludes assigning)
+    if getattr(up, 'disable') is True:
         return
 
     # Rest of statics
@@ -178,16 +181,17 @@ def updateProgress(percent=None,  # Static
         up.subMin = subMin + 1
         up.subMax = subMax
 
+    print '\r' + (' ' * 80) + '\r',   # clear
     #'[####################] 999 % | CSV 999 of 999 | GET 999 of 999'
     print '\r[{0}] {1} % | CSV {2} of {3} | GET {4} of {5}'.format(
         ('#' * (up.percent / (100 / GRANULARITY))).ljust(GRANULARITY),  # 0
         str(up.percent).rjust(3, ' '),  # 1
 
-        "%03d" % int(up.dsMin),  # 2
-        "%03d" % int(up.dsMax),  # 3
+        "%03d" % up.dsMin,  # 2
+        "%03d" % up.dsMax,  # 3
 
-        "%03d" % int(up.subMin),  # 4
-        "%03d" % int(up.subMax)  # 5
+        "%03d" % up.subMin,  # 4
+        "%03d" % up.subMax  # 5
     ),
     sys.stdout.flush()  # force write so progress shows
 #----------------------------------------------------------------------
@@ -264,6 +268,31 @@ def getConcepts(tree):
 
 
 #----------------------------------------------------------------------
+def filteredConcepts(tree, args):
+    """
+    Returns: [
+        [ original Index, Concept Name, Short File Name ], ...
+    ]
+
+    Depending upon whether or not argparse is filtered
+    """
+    concepts = getConcepts(tree)
+
+    concept_l = zip(
+        range(len(concepts)),  # index
+        concepts,  # String
+        [i.split('.')[0] for i in concepts]  # file name
+    )
+
+    return [
+        i for i in concept_l if (
+            not args.conceptIDs or (i[0] + 1) in args.conceptIDs
+        )
+    ]
+#----------------------------------------------------------------------
+
+
+#----------------------------------------------------------------------
 def buildOutputDirs(args):
     """
     Test & Create
@@ -283,7 +312,6 @@ def buildOutputDirs(args):
         raise IOError("%(F)s or %(F)s/data already exist" %
             {'F': rootFolder})
 
-
 #----------------------------------------------------------------------
 
 
@@ -292,6 +320,8 @@ def buildBadMD(tree, args):
     """
     Sorry to metadata a CSV, world
     """
+
+    #  Should I dump a field with filename/file loc too?
 
     root = tree.getroot()
 
@@ -313,12 +343,11 @@ def buildBadMD(tree, args):
         for idx, concept in enumerate(root.getchildren()):
             if not args.conceptIDs or (idx + 1) in args.conceptIDs:
                 for variable in concept.getchildren():
-                    outD = {
+                    dw.writerow({
                         'conceptName': concept.attrib['name'],
                         'varName': variable.attrib['name'],
                         'varText': variable.text,
-                    }
-                    dw.writerow(outD)
+                    })
 #----------------------------------------------------------------------
 
 
@@ -427,7 +456,7 @@ def buildCSV(concept, filename, tree):
         header = ['state', 'county'] + varlist
         out.write(codecs.BOM_UTF8)  # MS needs BOM
 
-        # header needs encoding
+        # header needs encoding.  Can't use writeheader w/o utf8
         out.write(
             ','.join(header).encode('utf8')
         )
@@ -436,8 +465,7 @@ def buildCSV(concept, filename, tree):
             out,
             header
         )
-        #dw.writeheader()
-        #dw.writerows(flatRows)
+        # Can't use dw.writerows unless I can find a way to encode them.
         for row in flatRows:
             dw.writerow({
                 k: v.encode('utf8') for k, v in row.items()
@@ -451,31 +479,19 @@ def buildCSVs(tree, args):
     Get list of concepts, make csv
     """
 
-    concept_l = zip(
-        getConcepts(tree),  # long name
-        [i.split('.')[0] for i in getConcepts(tree)]  # file name
-    )
+    pairedDown = filteredConcepts(tree, args)
 
-    pairedDown = []
-
-    for idx, (concept, shortName) in enumerate(concept_l):
-        # Preserve original indexes
-        if not args.conceptIDs or (idx + 1) in args.conceptIDs:
-            pairedDown.append((idx, (concept, shortName)))
-
-    #for idx, (concept, shortName) in enumerate(concept_l):
-    for idx, (concept, shortName) in pairedDown:
-        updateProgress(
-            #percent=(idx / float(len(concept_l))) * 100,
-            percent=(idx / float(len(pairedDown))) * 100,
-            dsMin=idx,
-            #dsMax=len(concept_l)
-            dsMax=len(pairedDown)
-        )
+    lookup = zip(*pairedDown)[0]  # Our real index #
+    for idx, concept, shortName in pairedDown:
         buildCSV(
             concept,
             opj(args.OUTDIR, 'data', shortName + '.csv'),
             tree
+        )
+        updateProgress(
+            percent=((lookup.index(idx) + 1) / float(len(lookup))) * 100,
+            dsMin=lookup.index(idx),
+            dsMax=len(lookup)
         )
 #----------------------------------------------------------------------
 
@@ -512,10 +528,8 @@ def mainConcepts(args):
 
     tree = getEtree(args.SF1)
 
-    concept_l = concept_l = zip(
-        getConcepts(tree),  # long name
-        [i.split('.')[0] for i in getConcepts(tree)]  # file name
-    )
+    # Filtered
+    pairedDown = filteredConcepts(tree, args)
 
     for head in [
         ["ID #", "Concept", "Census Description"],
@@ -527,18 +541,56 @@ def mainConcepts(args):
             head[2]
         )
 
-    # Cannot use enumerate here...buggy list
-
-    #index, filename, long concept
     #   5     15       rest
-    for idx, (concept, shortName) in enumerate(concept_l):
-        # If it isn't filtered, or if it is filtered and is in our list
-        if not args.conceptIDs or (idx + 1) in args.conceptIDs:
-            print "{0} | {1} | {2} ".format(
-                str(idx + 1).rjust(5),
-                shortName.rjust(15),
-                concept
-            )
+    for idx, concept, fileName in pairedDown:
+        print "{0} | {1} | {2} ".format(
+            str(idx + 1).rjust(5),
+            fileName.rjust(15),
+            concept
+        )
+#----------------------------------------------------------------------
+
+
+#----------------------------------------------------------------------
+def getParsed():
+    """
+    Return parsed arguments (arparse.NS)
+
+    Side effects:  argparse formatter setup
+    """
+
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__.strip()
+    )
+
+    parser.add_argument(
+        '-v', '--verbose', action='count', default=False,
+        help='verbose output (stacks)')
+
+    parser.add_argument(
+        '-p', '--progress', action='store_true', default=False,
+        help='show progress bar (download only)')
+
+    parser.add_argument(
+        '-l', '--list', action='store_true', default=False,
+        dest='listConcepts', help='print list of available Concepts & ID #s')
+
+    parser.add_argument('conceptIDs', type=int,
+        nargs='*', help="The concept ID #'s to fetch")
+
+    # http://www.census.gov/developers/data/sf1.xml
+    parser.add_argument('-x', '--xml', type=argparse.FileType('r'),
+        nargs='?', default='sf1.xml', dest='SF1',
+        help="US Census SF1 API Variables file [XML] (default: 'sf1.xml')")
+
+    parser.add_argument('-o', '--outdir', default='output',
+        nargs='?', dest='OUTDIR',
+        help="Output folder for files (default: 'outdir')")
+
+    parsed = parser.parse_args()
+
+    return parsed
 #----------------------------------------------------------------------
 
 
@@ -551,7 +603,7 @@ def main(args):
     setLogger(args)
 
     print ''  # CRLF for it to write to
-    updateProgress(disable=args.progress)
+    updateProgress(disable=not args.progress)
     updateProgress(0, 0, 1, 0, 1)  # Initialize
 
     buildOutputDirs(args)
@@ -570,43 +622,14 @@ def main(args):
 if __name__ == '__main__':
 
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # issues 1652
+    start_time = time.time()
+
+    parsed = getParsed()
+
     try:
-        start_time = time.time()
-
-        parser = argparse.ArgumentParser(
-            formatter_class=argparse.RawDescriptionHelpFormatter,
-            description=__doc__.strip()
-        )
-
-        parser.add_argument(
-            '-v', '--verbose', action='count', default=False,
-            help='Verbose Output (stacks)')
-
-        parser.add_argument(
-            '-p', '--progress', action='store_true', default=False,
-            help='Show Progress Bar (download only)')
-
-        parser.add_argument(
-            '-l', '--list', action='store_true', default=False,
-            dest='listConcepts', help='Print List of Available concepts')
-
-        parser.add_argument('conceptIDs', type=int,
-            nargs='*', help="The concept ID #'s to fetch")
-
-        parser.add_argument('-x', '--xml', type=argparse.FileType('r'),
-            nargs='?', default='sf1.xml', dest='SF1',
-            help='US Census Summary File 1 (default: sf1.xml)')
-
-        parser.add_argument('-o', '--outdir', default='output',
-            nargs='?', dest='OUTDIR',
-            help='Output folder for files (default: outdir)')
-
-        parsed = parser.parse_args()
-
         if parsed.listConcepts:
             mainConcepts(parsed)
         else:
-            #  Soon we need an argument to build just 1 concept file
             main(parsed)
 
         if parsed.verbose > 0:
