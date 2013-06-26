@@ -288,7 +288,7 @@ def buildOutputDirs(args):
 
 
 #----------------------------------------------------------------------
-def buildBadMD(tree, writeTo):
+def buildBadMD(tree, args):
     """
     Sorry to metadata a CSV, world
     """
@@ -304,20 +304,21 @@ def buildBadMD(tree, writeTo):
     # This probably needs to be UTF8-ified too
 
     #conceptName, varName, varText
-    with open(opj(writeTo, 'metadata.csv'), 'w') as md:
+    with open(opj(args.OUTDIR, 'metadata.csv'), 'w') as md:
         dw = csv.DictWriter(
             md,
             header
         )
         dw.writeheader()
-        for concept in root.getchildren():
-            for variable in concept.getchildren():
-                outD = {
-                    'conceptName': concept.attrib['name'],
-                    'varName': variable.attrib['name'],
-                    'varText': variable.text,
-                }
-                dw.writerow(outD)
+        for idx, concept in enumerate(root.getchildren()):
+            if not args.conceptIDs or (idx + 1) in args.conceptIDs:
+                for variable in concept.getchildren():
+                    outD = {
+                        'conceptName': concept.attrib['name'],
+                        'varName': variable.attrib['name'],
+                        'varText': variable.text,
+                    }
+                    dw.writerow(outD)
 #----------------------------------------------------------------------
 
 
@@ -556,7 +557,7 @@ def main(args):
     buildOutputDirs(args)
 
     tree = getEtree(args.SF1)
-    buildBadMD(tree, args.OUTDIR)  # Write csv (easy to inspect, not really MD though)
+    buildBadMD(tree, args)  # Write csv (easy to inspect, not really MD though)
     INFO('Metadata CSV generated')
     buildCSVs(tree, args)  # write lots of CSV
     updateProgress(100)  # Initialize
