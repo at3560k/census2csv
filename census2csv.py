@@ -268,6 +268,20 @@ def getConcepts(tree):
 
 
 #----------------------------------------------------------------------
+def getConceptNodeByName(tree, name):
+    """
+    Look up a concept by name in the sf1 (assumes names are distinct)
+    """
+    nodes = xquery(tree, "/apivariables/concept[@name='%s']" % name)
+    if len(nodes) > 1:
+        ERR('Returning first found node for concept: %s' % name)
+        ERR('This is likely a bug')
+
+    return nodes[0]
+#----------------------------------------------------------------------
+
+
+#----------------------------------------------------------------------
 def filteredConcepts(tree, args):
     """
     Returns: [
@@ -279,14 +293,14 @@ def filteredConcepts(tree, args):
     concepts = getConcepts(tree)
 
     concept_l = zip(
-        range(len(concepts)),  # index
+        range(1, len(concepts) + 1),  # index, (1-indexed)
         concepts,  # String
         [i.split('.')[0] for i in concepts]  # file name
     )
 
     return [
         i for i in concept_l if (
-            not args.conceptIDs or (i[0] + 1) in args.conceptIDs
+            not args.conceptIDs or (i[0]) in args.conceptIDs
         )
     ]
 #----------------------------------------------------------------------
@@ -322,9 +336,6 @@ def buildBadMD(tree, args):
     """
 
     #  Should I dump a field with filename/file loc too?
-
-    root = tree.getroot()
-
     header = [
         'conceptName',
         'varName',
@@ -332,22 +343,22 @@ def buildBadMD(tree, args):
     ]
 
     # This probably needs to be UTF8-ified too
-
-    #conceptName, varName, varText
     with open(opj(args.OUTDIR, 'metadata.csv'), 'w') as md:
         dw = csv.DictWriter(
             md,
             header
         )
         dw.writeheader()
-        for idx, concept in enumerate(root.getchildren()):
-            if not args.conceptIDs or (idx + 1) in args.conceptIDs:
-                for variable in concept.getchildren():
-                    dw.writerow({
-                        'conceptName': concept.attrib['name'],
-                        'varName': variable.attrib['name'],
-                        'varText': variable.text,
-                    })
+        for idx, conceptName, fileName in filteredConcepts(tree, args):
+            # Some of this thrown out.
+            conceptNode = getConceptNodeByName(tree, conceptName)
+            # Pretty inefficient multiple parses.  But fast enough for now
+            for variable in conceptNode.getchildren():
+                dw.writerow({
+                    'conceptName': conceptName,
+                    'varName': variable.attrib['name'],
+                    'varText': variable.text,
+                })
 #----------------------------------------------------------------------
 
 
@@ -489,7 +500,7 @@ def buildCSVs(tree, args):
             tree
         )
         updateProgress(
-            percent=((lookup.index(idx) + 1) / float(len(lookup))) * 100,
+            percent=((lookup.index(idx)) / float(len(lookup))) * 100,
             dsMin=lookup.index(idx),
             dsMax=len(lookup)
         )
@@ -544,7 +555,7 @@ def mainConcepts(args):
     #   5     15       rest
     for idx, concept, fileName in pairedDown:
         print "{0} | {1} | {2} ".format(
-            str(idx + 1).rjust(5),
+            str(idx).rjust(5),
             fileName.rjust(15),
             concept
         )
